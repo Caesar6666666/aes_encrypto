@@ -13,90 +13,90 @@
 #include <cstdint>
 #include <ranges>
 #include <argparse/argparse.hpp>
+#include <filesystem>
 using namespace std;
 
-CryptoPP::byte key[CryptoPP::AES::DEFAULT_KEYLENGTH]{'C','A','E','S','A','R'}, iv[CryptoPP::AES::BLOCKSIZE]{};
+CryptoPP::byte iv[CryptoPP::AES::BLOCKSIZE]{};
 
+void init_iv()
+{
+    std::fill(std::begin(iv), std::end(iv), 0x00);
+}
 
-
-string encrypt(const unsigned char* plainText, uint32_t len)
+string encrypt(const char* text, size_t len, const string& key)
 {
     string cipherText;
 
-    //
-    CryptoPP::AES::Encryption aesEncryption(key, CryptoPP::AES::DEFAULT_KEYLENGTH);
+    CryptoPP::AES::Encryption aesEncryption(reinterpret_cast<const unsigned char*>(key.c_str()), CryptoPP::AES::DEFAULT_KEYLENGTH);
     CryptoPP::CBC_Mode_ExternalCipher::Encryption cbcEncryption(aesEncryption, iv);
     CryptoPP::StreamTransformationFilter stfEncryptor(cbcEncryption, new CryptoPP::StringSink(cipherText));
-    stfEncryptor.Put(plainText, len);
+    stfEncryptor.Put(reinterpret_cast<const unsigned char*>(text), len);
     stfEncryptor.MessageEnd();
 
     return cipherText;
 }
 
 
-void write_file(const string& output, const string path)
-{
-    ofstream out(path,ios::binary);
-    out.write(output.c_str(), output.length());
-    out.close();
-
-    //cout << "wirte finish" << endl << endl;
-}
-
-string decrypt(string cipherTextHex)
+string decrypt(const char* cipherTextHex, size_t len, const string& key)
 {
     string decryptedText;
 
-    //
-    CryptoPP::AES::Decryption aesDecryption(key, CryptoPP::AES::DEFAULT_KEYLENGTH);
+    CryptoPP::AES::Decryption aesDecryption(reinterpret_cast<const unsigned char*>(key.c_str()), CryptoPP::AES::DEFAULT_KEYLENGTH);
     CryptoPP::CBC_Mode_ExternalCipher::Decryption cbcDecryption(aesDecryption, iv);
     CryptoPP::StreamTransformationFilter stfDecryptor(cbcDecryption, new CryptoPP::StringSink(decryptedText));
-    stfDecryptor.Put(reinterpret_cast<const unsigned char*>(cipherTextHex.c_str()), cipherTextHex.size());
+    stfDecryptor.Put(reinterpret_cast<const unsigned char*>(cipherTextHex), len);
 
     stfDecryptor.MessageEnd();
 
     return decryptedText;
 }
 
-string read_file(const string& path)
+void aes_encrypt_file(const string& input_file, const string& output_file, const string& key)
 {
-    ifstream in;
-    in.open(path, ios::binary);
-
-    stringstream streambuffer;
-    streambuffer << in.rdbuf();
-    string text = std::move(streambuffer.str());
-    in.close();
-    /*for(auto i:text) cout << format("{:x}", (unsigned char)i);
-    cout << "readCipher finish " << endl;*/
-
-    return text;
-}
-
-void aes_encrypt_file(const string& input, const string& output, const string& key)
-{
+	//read the input file
+    std::uint64_t size = std::filesystem::file_size(input_file);
 	ifstream in;
-	in.open(input, ios::binary);
+    in.open(input_file, ios::binary);
 
-	stringstream streambuffer;
-	streambuffer << in.rdbuf();
-	string text = std::move(streambuffer.str());
-	in.close();
+    const size_t blocksize = CryptoPP::AES::BLOCKSIZE * 1000 * 1000;  // 16MB
+    unique_ptr<char[]> buffer{new char[blocksize]};
 
-	string chipherHex = std::move(encrypt((const unsigned char*)text.c_str(), text.length()));
+    //create the output file
+    ofstream out;
+    out.open(output_file, ios::trunc);
+    out.close();
 
-    /*for (auto i : chipherHex) {
-		cout << format("{:x}", (unsigned char)i);
-	}
-	cout << "$aesend" << endl;*/
-	write_file(chipherHex, output);
+    out.open(output_file, ios::app | ios::binary);
+    for (size_t i = 0; i < size; i+= blocksize)
+    {
+        in.read(buffer.get(), blocksize);
+        string chipherHex{ std::move(encrypt(buffer.get(), in.gcount(), key))};
+        out.write(chipherHex.c_str(), chipherHex.length());
+    }
+	out.close();
 }
 
-void aes_decrypt_file(const string& input, const string& output, const string& key)
+void aes_decrypt_file(const string& input_file, const string& output_file, const string& key)
 {
-	string cipherTextHex = std::move(read_file(input));
-	string outstring = decrypt(cipherTextHex);
-	write_file(outstring, output);
+    std::uint64_t size = std::filesystem::file_size(input_file);
+    ifstream in;
+    in.open(input_file, ios::binary);
+
+    const size_t blocksize = CryptoPP::AES::BLOCKSIZE * 1000 * 1000;  // 16MB
+    unique_ptr<char[]> buffer {new char[blocksize + 16]};
+
+    //create the output file
+    ofstream out;
+    out.open(output_file, ios::trunc);
+    out.close();
+    out.open(output_file, ios::app | ios::binary);
+    for (size_t i = 0; i < size; i += blocksize + 16)
+    {
+		in.read(buffer.get(), blocksize + 16);
+		string chipherHex{ std::move(decrypt(buffer.get(), in.gcount(), key))};
+        out.write(chipherHex.c_str(), chipherHex.length());
+	}
+    out.close();
 }
 
 
@@ -123,6 +123,15 @@ int main(int argc, char* argv[])
 		std::cout << program;
 		exit(1);
 	}
+    // check file exists
+    if (!std::filesystem::exists(program.get<string>("file")))
+    {
+		std::cout << "file not exists" << std::endl;
+		exit(1);
+	}
+    string key{ program.get<string>("-k") };
+    key.resize(CryptoPP::AES::DEFAULT_KEYLENGTH);
+    init_iv();
     if (program["-d"] == true)
     {
 		aes_decrypt_file(program.get<string>("file"), program.get<string>("-o"), program.get<string>("-k"));
