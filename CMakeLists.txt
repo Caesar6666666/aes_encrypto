@@ -17,7 +17,7 @@ project ("aescrypto")
 set(CMAKE_CXX_STANDARD 23)
 find_package(cryptopp CONFIG REQUIRED)
 # 将源代码添加到此项目的可执行文件。
-add_executable (aescrypto "aescrypto.cpp" "aescrypto.h")
+add_executable (aescrypto "main.cpp" "aescrypto.cpp" "aescrypto.h")
 
 find_package(argparse CONFIG REQUIRED)
 

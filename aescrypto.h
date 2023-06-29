@@ -2,7 +2,14 @@
 // 或项目特定的包含文件。
 
 #pragma once
+#include <string>
+void init_iv();
 
-#include <iostream>
+std::string encrypt(const char* text, size_t len, const std::string& key);
 
-// TODO: 在此处引用程序需要的其他标头。
+
+std::string decrypt(const char* cipherTextHex, size_t len, const std::string& key);
+
+void aes_encrypt_file(const std::string& input_file, const std::string& output_file, const std::string& key);
+
+void aes_decrypt_file(const std::string& input_file, const std::string& output_file, const std::string& key);
